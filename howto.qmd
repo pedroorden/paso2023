@@ -1,0 +1,596 @@
+---
+title: "tutotrial"
+format: html
+editor: visual
+---
+
+# **Presentación**
+
+A lo largo de diversos posts de este blog, hemos abordado aspectos generales de la denominada analítica electoral tomando como casos de aplicación las Elecciones Nacionales de 2019 y 2021. En este oportunidad, la propuesta es presentar, con código abierto, una serie de procesos clave, orientados a la extracción, transformación y análisis de datos electorales de las elecciones PASO 2023. En particular haremos foco en las elecciones para la categoría Presidente y Vice en el Conurbano Sur de la Provincia de Buenos Aires.
+
+En la primera parte de este documento electrónico, nos enfocaremos en la extracción y construcción de data electoral operativa, tomando como unidad de análisis las elecciones PASO 2023. Exploraremos cómo acceder a los datos, limpiarlos y estructurarlos en un formato adecuado para su lectura y abordaje.
+
+En la segunda parte, daremos un paso adelante, al crear una Shiny App; una herramienta versátil que nos permitir\[a explorar y visualizar los resultados electorales de manera interactiva. Ello a través de una interfaz de usuario amigable, que favorece la personalizacion del análisis y compartir hallazgos de manera efectiva.
+
+Comencemos ahora con la primera parte y exploremos el proceso de ETL para obtener y estructurar nuestros datos electorales.
+
+# **Parte 1: extracción y construcción del set de datos electorales PASO 2023**
+
+En esta primera parte, aprenderemos cómo extraer y construir un conjunto de datos electorales a partir de archivos JSON que contienen los resultados de las elecciones PASO 2023 para la categoría de Presidente y Vicepresidente.
+
+## Contexto
+
+Las elecciones PASO (Primarias, Abiertas, Simultáneas y Obligatorias) son un evento crucial en la vida política de Argentina. En este documento abierto, nos enfocaremos en analizar el desempeño de las fuerzas políticas en la región del Conurbano Sur de la Provincia de Buenos Aires, que incluye los municipios de Almirante Brown, Avellaneda, Berazategui, Esteban Echeverría, Ezeiza, Florencio Varela, Lanús, Lomas de Zamora y Quilmes.
+
+## ¿Qué es un JSON?
+
+Un JSON (JavaScript Object Notation) es un formato de archivo que se utiliza para almacenar y organizar datos estructurados de manera legible para máquinas y humanos. Consiste en una colección de pares clave-valor, donde los datos se organizan en una estructura jerárquica similar a un árbol. En el contexto de nuestro tutorial, los archivos JSON contienen información detallada sobre los resultados de las elecciones en los diferentes circuitos de los municipios de la región.
+
+## Origen de los Datos
+
+Los datos que utilizaremos fueron obtenidos del repositorio abierto del[Equipo de desarrollo La Izquierda Diario](https://gitlab.com/lid.datos/lid-bases-de-datos), que realiza una valiosa recopilación de datos electorales de las últimas elecciones en Argentina. Los datos de las PASO 2023 se presentan en archivos JSON tal como fueron abiertos por la DINE.
+
+Para nuestro ejemplo operaremos con un recorte de la data citada, alojado en la carpeta "circuitos_pba_sur", disponibles en el [respositorio](https://github.com/pedroorden/paso2023) de este trabajo.
+
+## Código para la Extracción y Construcción de Datos
+
+Como ya fue fue mencionado, el objetivo en esta etapa es procesar los valores almacenados en archivos JSON que contienen información sobre los resultados de las elecciones PASO 2023 en diferentes municipios del Conurbano Sur de Buenos Aires.
+
+Para lograr esto, con nuestro código crearemos una función llamada "procesar_municipio", la cual se va a encargar de manejar los datos de cada municipio por separado. Luego, procede a buscar archivos JSON en carpetas designadas para cada municipio, donde cada carpeta representa un municipio en la región.
+
+Una vez que se localizan los archivos JSON en cada carpeta, el código itera a través de ellos para extraer información relevante relacionada con los resultados electorales. Durante este proceso, se verifica si cada archivo contiene datos válidos y, en caso afirmativo, se organizan de manera estructurada.
+
+La siguiente etapa consiste en combinar los datos de resultados electorales de todos los municipios en un único conjunto de datos coherente. Finalmente, este conjunto de datos se guarda en un archivo CSV en una carpeta "data", creando así un registro organizado que almacena los resultados electorales de toda la región.
+
+Veamos como quedaría nuestro código comentado:
+
+```{r}
+library(jsonlite)
+library(tidyverse)
+
+# Función para procesar un municipio
+procesar_municipio <- function(municipio) {
+  ruta_carpeta <- paste0("circuitos_pba_sur/", municipio)
+  archivos_json <- list.files(path = ruta_carpeta, pattern = "*.json", full.names = TRUE)
+  
+lista_data_frames <- list()
+  
+  for (archivo_json in archivos_json) {
+    json_text <- readLines(archivo_json, warn = FALSE)
+    json_data <- fromJSON(paste(json_text, collapse = ""))
+    nombre_archivo <- tools::file_path_sans_ext(basename(archivo_json))
+    
+    if ("valoresTotalizadosPositivos" %in% names(json_data)) {
+      valores_totalizados <- as.data.frame(json_data$valoresTotalizadosPositivos)
+      valores_totalizados$identificador <- nombre_archivo
+      lista_data_frames[[nombre_archivo]] <- valores_totalizados
+    }
+  }
+  
+  municipio_df <- do.call(rbind, lista_data_frames)
+  municipio_df$municipio <- municipio
+  return(municipio_df)
+}
+
+# Lista de municipios
+municipios <- c("avellaneda", "lanús", "lomas de zamora", "almirante brown", "florencio varela", "berazategui", "quilmes", "ezeiza", "esteban echevarria")
+
+# Procesar cada municipio y almacenar los resultados en una lista
+lista_municipios <- lapply(municipios, procesar_municipio)
+
+# Unir todos los data frames en uno solo
+conurbano_sur <- bind_rows(lista_municipios)
+
+# Realizar transformaciones adicionales si es necesario
+conurbano_sur <- conurbano_sur %>%
+  separate(identificador, into = c("id1", "id2", "circuito"), sep = "_") %>%
+  select(!c(listas, idAgrupacionTelegrama, id1, id2)) %>%
+  mutate(nombreAgrupacion = str_to_title(nombreAgrupacion)) %>% 
+  mutate(municipio = str_to_title(municipio))
+  
+rownames(conurbano_sur) <- NULL
+
+# Imprimir o guardar el resultado en un archivo CSV
+write.csv(conurbano_sur, "data/conurbano_sur.csv", row.names = FALSE)
+```
+
+# Parte 2: mostrando nuestros datos en una Shinyapp
+
+En esta segunda parte del documento, nos adentraremos en la creación de una aplicación Shiny.
+
+[Shiny](https://shiny.posit.co/) es un paquete de R, una herramienta open source que permite desarrollar aplicaciones web interactivas de manera sencilla y eficiente. En este contexto, la utilizaremos para construir una herramienta que permita a los usuarios explorar y comparar los resultados electorales de las Elecciones PASO 2023 en el Conurbano Sur de la Provincia de Buenos Aires.
+
+## Lógica general
+
+Una Shiny app es un tipo aplicación web, interactiva. Funciona mediante una arquitectura cliente-servidor, donde el código R en el servidor procesa los datos y controla las interacciones, mientras que la interfaz de usuario se muestra en el navegador web del usuario. Esto significa que las personas pueden interactuar con la aplicación en tiempo real, sin necesidad de conocimientos de programación.
+
+Siguiendo esta lógica, crearemos una app para visualizar y analizar los datos electorales, la cual permitirá seleccionar diferentes municipios, circuitos y agrupaciones políticas a través de la interfaz de usuario de la aplicación. Cuando se realice una selección, la aplicación Shiny actualizará automáticamente los gráficos y visualizaciones para reflejar los datos específicos seleccionados. Esto permite a los usuarios analizar data electoral de manera dinámica y personalizada.
+
+## Funcionamiento
+
+Es de vital importancia definir las dinámicas de funcionamiento de la app para estructurar su desarrollo. en este caso nos interesará que nuestro artefacto cumpla con 3 funciones clave:\
+\
+**Interacción con los Datos**: la shiny debe permitir a los usuarios interactuar directamente con los datos electorales, estimulando la exploración y comparación de las distintas perfomances electorales de las agrupaciones políticas por circuito electoral en el Conurbano Sur.
+
+**Análisis Dinámico**: la app debe contar inputs que funcionen de manera ágil y que en su combinanción aporten valor a las preguntas del usuario.
+
+**Comunicación Efectiva**: el resultado final debe ser una herramienta sencilla de usar, que devuelva resultados de forma gráfica y comprensible.
+
+## El código paso a paso
+
+El código de nuestra Shiny comienza cargando las librerías necesarias y los datos que previamente procesamos desde un archivo CSV. Estos datos son esenciales para alimentar nuestra aplicación, ya que constituyen la materia prima con la que trabajará la plataforma. Sin datos, una Shiny carecería de su razón de ser, ya que no tendría información con la cual interactuar ni presentar a los usuarios. Los datos permiten crear gráficos interactivos, tablas dinámicas y análisis en tiempo real, lo que enriquece la experiencia del usuario y brinda un valor real a la aplicación.
+
+```{r}
+
+library(shiny)
+library(dplyr)
+library(ggplot2)
+
+# Carga los datos
+datos <- read.csv("data/conurbano_sur.csv")
+
+# Ordenar los datos por la columna "votos" de manera descendente (de mayor a menor)
+datos <- datos %>% arrange(desc(votos))
+```
+
+**La interfaz** de la aplicación Shiny se define en la variable "ui". Aquí es donde se establece el diseño y la estructura de la página web de la aplicación. Se incluyen elementos como títulos, descripciones, campos de selección y gráficos. Es importante destacar que Shiny permite crear aplicaciones web interactivas sin necesidad de conocimientos avanzados en desarrollo web, lo que lo hace accesible para científicos de datos y analistas.
+
+```{r}
+ui <- fluidPage(
+  # Estilo CSS personalizado
+  tags$head(tags$style(
+    HTML(
+      "
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f7ff; /* Fondo celeste claro */
+        margin: 1;
+        padding: 1;
+      }
+      .container {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #ffffff;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+      .title {
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        color: #333;
+      }
+      .description {
+        font-size: 16px;
+        margin-bottom: 20px;
+        color: #666;
+      }
+      .content {
+        padding: 20px;
+      }
+      .footer {
+        text-align: center;
+        margin-top: 20px;
+        padding: 10px;
+        border-top: 1px solid #ccc;
+      }
+      .input-label {
+        font-weight: bold;
+      }
+      "
+    )
+  )),
+  
+  # Contenedor principal
+  div(class = "container",
+      
+      # Título principal
+      div(class = "title", "Monitor de Resultados Electorales PASO 2023"),
+      
+      # Instrucciones de uso de la app
+      div(class = "content-body",
+          p("El monitor de Resultados Electorales ofrece la capacidad de realizar un análisis 
+            personalizado de las Elecciones PASO 2023 en la categoría de Presidente, 
+            específicamente en los circuitos y municipios del Conurbano Sur de la 
+            Provincia de Buenos Aires. La información se presenta de manera gráfica 
+            para facilitar la exploración y comparación de la performance de las 
+            diferentes fuerzas políticas. Cada visual cuenta con una línea punteada que 
+            representa los promedios generales por circuito para cada fuerza política, 
+            ofreciendo una visión general del desempeño medio en cada circuito.")
+      ),
+      
+      # Contenido de la app
+      div(class = "panel-body",
+          # Inputs en dos hileras por dos filas
+          div(
+            div(
+              class = "col-md-6",
+              style = "text-align: center; border-radius: 8px; font-size: 100%; padding-left: 8em;",
+              div(class = "input-field", selectInput("municipio", "Seleccioná un Municipio del menú", 
+                                                     choices = unique(datos$municipio),
+                                                     selected = "Lanús"))
+            ),
+            div(
+              class = "col-md-6",
+              style = "text-align: center; border-radius: 8px; font-size: 100%; padding-left: 8em;",
+              div(class = "input-field", selectizeInput("circuitos", "Filtrá por Circuito Electoral", choices = NULL, multiple = TRUE))
+            )
+          ),
+          div(
+            div(
+              class = "col-md-6",
+              style = "text-align: center; border-radius: 8px; font-size: 100%; padding-left: 8em;",
+              div(class = "input-field", selectInput("agrupacion", "Elegí las agrupaciones políticas a comparar", 
+                                                     choices = unique(datos$nombreAgrupacion),
+                                                     selected = c("Union Por La Patria", "La Libertad Avanza"),
+                                                     multiple = TRUE))
+            ),
+            div(
+              class = "col-md-6",
+              style = "text-align: center; border-radius: 8px; font-size: 100%; padding-left: 8em;",
+              div(class = "input-field", uiOutput("slider_porcentaje"))
+            )
+          ),
+          
+          # Gráfico de Municipios
+          div(class = "col-md-12",
+              plotOutput("grafico_municipios"))
+      ),
+      
+      # Pie de página
+      div(class = "footer",
+          p("Un desarrollo abierto de Pedro Damián Orden. Fuente de los datos aquí."))
+  )
+)
+
+
+
+
+```
+
+**El servidor** de la aplicación se define en la función "server". Este componente es el núcleo de la aplicación Shiny y se encarga de gestionar las interacciones del usuario y las actualizaciones en tiempo real. Por ejemplo, cuando un usuario selecciona un municipio en el menú desplegable, el servidor de Shiny actualiza dinámicamente los circuitos disponibles en función de ese municipio, lo que facilita la exploración de los datos electorales.
+
+```{r}
+
+server <- function(input, output, session) {
+  
+  observe({
+    circuitos_disponibles <- unique(datos$circuito[datos$municipio == input$municipio])
+    updateSelectizeInput(session, "circuitos", choices = circuitos_disponibles, selected = circuitos_disponibles)
+  })
+  
+  observe({
+    filtro <- filter(
+      datos,
+      municipio == input$municipio &
+        circuito %in% input$circuitos &
+        nombreAgrupacion %in% input$agrupacion
+    )
+    
+    if (!is.null(filtro$votosPorcentaje)) {
+      min_porcentaje <- min(filtro$votosPorcentaje)
+      max_porcentaje <- max(filtro$votosPorcentaje)
+      updateSliderInput(session, "rango_porcentaje", min = min_porcentaje, max = max_porcentaje, value = c(min_porcentaje, max_porcentaje))
+    }
+  })
+  
+  output$slider_porcentaje <- renderUI({
+    req(input$municipio, input$circuitos, input$agrupacion)
+    
+    filtro <- filter(
+      datos,
+      municipio == input$municipio &
+        circuito %in% input$circuitos &
+        nombreAgrupacion %in% input$agrupacion
+    )
+    
+    if (!is.null(filtro$votosPorcentaje)) {
+      min_porcentaje <- min(filtro$votosPorcentaje)
+      max_porcentaje <- max(filtro$votosPorcentaje)
+      
+      sliderInput("rango_porcentaje", "Segmentá por el rango % votos:",
+                  min = min_porcentaje, max = max_porcentaje, value = c(min_porcentaje, max_porcentaje))
+    }
+  })
+  
+  # ... (código anterior)
+  
+  output$grafico_municipios <- renderPlot({
+    tryCatch({
+      filtro <- filter(
+        datos,
+        municipio == input$municipio &
+          circuito %in% input$circuitos &
+          nombreAgrupacion %in% input$agrupacion &
+          votosPorcentaje >= input$rango_porcentaje[1] &
+          votosPorcentaje <= input$rango_porcentaje[2]
+      )
+      
+      if (nrow(filtro) == 0) {
+        # Si no hay datos válidos para facetar, muestra un mensaje informativo en lugar del gráfico
+        text(0.5, 0.5, "Cargando", cex = 1.2)
+      } else {
+        promedios_por_agrupacion <- datos %>%
+          group_by(circuito, nombreAgrupacion) %>%
+          summarize(promedio = mean(votosPorcentaje))
+        
+        promedios_por_municipio <- datos %>%
+          filter(
+            municipio == input$municipio &
+              circuito %in% input$circuitos &
+              nombreAgrupacion %in% input$agrupacion
+          ) %>%
+          group_by(municipio, nombreAgrupacion) %>%
+          summarize(promedio = mean(votosPorcentaje))
+        
+        ggplot(filtro, aes(x = circuito, y = votosPorcentaje, fill = factor(circuito))) +
+          geom_bar(stat = "identity", show.legend = FALSE) +
+          geom_text(aes(label = paste0(round(votosPorcentaje, 1), "%")),
+                    position = position_dodge(0.9),
+                    vjust = -0.5,
+                    size = 3) +
+          geom_hline(data = promedios_por_municipio, aes(yintercept = promedio, label = paste0(round(promedio, 1), "%")), 
+                     color = "tomato", linetype = "dashed", 
+                     size = 0.7,
+                     alpha = 0.6
+          ) +
+          scale_fill_manual(values = c("#66c2a5", "#fc7d62", "#8da2cb", "#e95ac3", "#e9d110", "#e4c2a5", "#ac5d62", "#3da0cb", "#a19ae0", "#a6d854", "#66c2a5", "#fc7d62", "#1da2cb", "#a95ac3", "#e3d990", "#a4c2a5", "#1da2cb", "#a99ae0", "#a1d111", "#16c2a5", "#fc9d62", "#1da2cb", "#e17ac3", "#e1d990", "#e4c2a5", "#ac5d62", "#3da0cb", "#a19ae0", "#a6d854")) +
+          theme_minimal() +
+          theme(axis.text.x = element_text(angle = 45, hjust = 1),
+                strip.text = element_text(face = "bold")) +
+          labs(x = "Circuito", y = "Porcentaje de Votos") +
+          facet_wrap(~nombreAgrupacion, scales = "free", ncol = 2) +
+          ylim(0, 100)
+      }
+    }, error = function(e) {
+      
+    }, silent = TRUE)
+  })
+  
+}
+
+```
+
+El elemento central de esta aplicación Shiny es un gráfico interactivo que muestra los resultados electorales en los circuitos seleccionados. Los usuarios pueden aplicar filtros y seleccionar agrupaciones políticas específicas para explorar los datos de manera más detallada. Esta interactividad proporciona a los profesionales de la analítica de datos una herramienta poderosa para analizar y comunicar los resultados electorales de manera efectiva.
+
+El código final de nuestra app queda estructurado de la siguiente manera:
+
+```{r}
+
+library(shiny)
+library(dplyr)
+library(ggplot2)
+
+# Carga los datos (reemplaza "tus_datos.csv" con el nombre de tu archivo)
+datos <- read.csv("data/conurbano_sur.csv")
+
+# Ordenar los datos por la columna "votos" de manera descendente (de mayor a menor)
+datos <- datos %>% arrange(desc(votos))
+
+ui <- fluidPage(
+  # Estilo CSS personalizado
+  tags$head(tags$style(
+    HTML(
+      "
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f7ff; /* Fondo celeste claro */
+        margin: 1;
+        padding: 1;
+      }
+      .container {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #ffffff;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+      .title {
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        color: #333;
+      }
+      .description {
+        font-size: 16px;
+        margin-bottom: 20px;
+        color: #666;
+      }
+      .content {
+        padding: 20px;
+      }
+      .footer {
+        text-align: center;
+        margin-top: 20px;
+        padding: 10px;
+        border-top: 1px solid #ccc;
+      }
+      .input-label {
+        font-weight: bold;
+      }
+      "
+    )
+  )),
+  
+  # Contenedor principal
+  div(class = "container",
+      
+      # Título principal
+      div(class = "title", "Monitor de Resultados Electorales PASO 2023"),
+      
+      # Instrucciones de uso de la app
+      div(class = "content-body",
+          p("El monitor de Resultados Electorales ofrece la posibilidad de realizar un análisis 
+            personalizado de las Elecciones PASO 2023 en la categoría de Presidente, 
+            específicamente en los circuitos y municipios del Conurbano Sur de la 
+            Provincia de Buenos Aires. La información se presenta de manera gráfica 
+            para facilitar la exploración y comparación de la performance de las 
+            diferentes fuerzas políticas. Cada visual cuenta con una línea punteada que 
+            representa los promedios generales por circuito para cada fuerza política, 
+            ofreciendo una visión general del desempeño medio en cada circuito.")
+      ),
+      
+      # Contenido de la app
+      div(class = "panel-body",
+          # Inputs en dos hileras por dos filas
+          div(
+            div(
+              class = "col-md-6",
+              style = "text-align: center; border-radius: 8px; font-size: 100%; padding-left: 8em;",
+              div(class = "input-field", selectInput("municipio", "Seleccioná un Municipio del menú", 
+                                                     choices = unique(datos$municipio),
+                                                     selected = "Lanús"))
+            ),
+            div(
+              class = "col-md-6",
+              style = "text-align: center; border-radius: 8px; font-size: 100%; padding-left: 8em;",
+              div(class = "input-field", selectizeInput("circuitos", "Filtrá por Circuito Electoral", choices = NULL, multiple = TRUE))
+            )
+          ),
+          div(
+            div(
+              class = "col-md-6",
+              style = "text-align: center; border-radius: 8px; font-size: 100%; padding-left: 8em;",
+              div(class = "input-field", selectInput("agrupacion", "Elegí las agrupaciones políticas a comparar", 
+                                                     choices = unique(datos$nombreAgrupacion),
+                                                     selected = c("Union Por La Patria", "La Libertad Avanza"),
+                                                     multiple = TRUE))
+            ),
+            div(
+              class = "col-md-6",
+              style = "text-align: center; border-radius: 8px; font-size: 100%; padding-left: 8em;",
+              div(class = "input-field", uiOutput("slider_porcentaje"))
+            )
+          ),
+          
+          # Gráfico de Municipios
+          div(class = "col-md-12",
+              plotOutput("grafico_municipios"))
+      ),
+      
+      # Pie de página
+      div(class = "footer",
+          p("Un desarrollo abierto de Pedro Damián Orden. Fuente de los datos aquí."))
+  )
+)
+
+
+
+#Servidor
+server <- function(input, output, session) {
+  
+  observe({
+    circuitos_disponibles <- unique(datos$circuito[datos$municipio == input$municipio])
+    updateSelectizeInput(session, "circuitos", choices = circuitos_disponibles, selected = circuitos_disponibles)
+  })
+  
+  observe({
+    filtro <- filter(
+      datos,
+      municipio == input$municipio &
+        circuito %in% input$circuitos &
+        nombreAgrupacion %in% input$agrupacion
+    )
+    
+    if (!is.null(filtro$votosPorcentaje)) {
+      min_porcentaje <- min(filtro$votosPorcentaje)
+      max_porcentaje <- max(filtro$votosPorcentaje)
+      updateSliderInput(session, "rango_porcentaje", min = min_porcentaje, max = max_porcentaje, value = c(min_porcentaje, max_porcentaje))
+    }
+  })
+  
+  output$slider_porcentaje <- renderUI({
+    req(input$municipio, input$circuitos, input$agrupacion)
+    
+    filtro <- filter(
+      datos,
+      municipio == input$municipio &
+        circuito %in% input$circuitos &
+        nombreAgrupacion %in% input$agrupacion
+    )
+    
+    if (!is.null(filtro$votosPorcentaje)) {
+      min_porcentaje <- min(filtro$votosPorcentaje)
+      max_porcentaje <- max(filtro$votosPorcentaje)
+      
+      sliderInput("rango_porcentaje", "Segmentá por el rango % votos:",
+                  min = min_porcentaje, max = max_porcentaje, value = c(min_porcentaje, max_porcentaje))
+    }
+  })
+  
+  output$grafico_municipios <- renderPlot({
+    tryCatch({
+      filtro <- filter(
+        datos,
+        municipio == input$municipio &
+          circuito %in% input$circuitos &
+          nombreAgrupacion %in% input$agrupacion &
+          votosPorcentaje >= input$rango_porcentaje[1] &
+          votosPorcentaje <= input$rango_porcentaje[2]
+      )
+      
+      if (nrow(filtro) == 0) {
+        # Si no hay datos válidos para facetar, muestra un mensaje informativo en lugar del gráfico
+        text(0.5, 0.5, "Cargando", cex = 1.2)
+      } else {
+        promedios_por_agrupacion <- datos %>%
+          group_by(circuito, nombreAgrupacion) %>%
+          summarize(promedio = mean(votosPorcentaje))
+        
+        promedios_por_municipio <- datos %>%
+          filter(
+            municipio == input$municipio &
+              circuito %in% input$circuitos &
+              nombreAgrupacion %in% input$agrupacion
+          ) %>%
+          group_by(municipio, nombreAgrupacion) %>%
+          summarize(promedio = mean(votosPorcentaje))
+        
+        ggplot(filtro, aes(x = circuito, y = votosPorcentaje, fill = factor(circuito))) +
+          geom_bar(stat = "identity", show.legend = FALSE) +
+          geom_text(aes(label = paste0(round(votosPorcentaje, 1), "%")),
+                    position = position_dodge(0.9),
+                    vjust = -0.5,
+                    size = 3) +
+          geom_hline(data = promedios_por_municipio, aes(yintercept = promedio, label = paste0(round(promedio, 1), "%")), 
+                     color = "tomato", linetype = "dashed", 
+                     size = 0.7,
+                     alpha = 0.6
+          ) +
+          scale_fill_manual(values = c("#66c2a5", "#fc7d62", "#8da2cb", "#e95ac3", "#e9d110", "#e4c2a5", "#ac5d62", "#3da0cb", "#a19ae0", "#a6d854", "#66c2a5", "#fc7d62", "#1da2cb", "#a95ac3", "#e3d990", "#a4c2a5", "#1da2cb", "#a99ae0", "#a1d111", "#16c2a5", "#fc9d62", "#1da2cb", "#e17ac3", "#e1d990", "#e4c2a5", "#ac5d62", "#3da0cb", "#a19ae0", "#a6d854")) +
+          theme_minimal() +
+          theme(axis.text.x = element_text(angle = 45, hjust = 1),
+                strip.text = element_text(face = "bold")) +
+          labs(x = "Circuito", y = "Porcentaje de Votos") +
+          facet_wrap(~nombreAgrupacion, scales = "free", ncol = 2) +
+          ylim(0, 100)
+      }
+    }, error = function(e) {
+      
+    }, silent = TRUE)
+  })
+  
+}
+
+shinyApp(ui, server)
+
+
+```
+
+y en vivo funciona así:
+
+Una pregunta pertinente llegado este momento es qué hacer una vez que la shiny esta funcionando de manera local. Esa respuesta quedará para otro momento pero por [acá hay (una o varias) pistas.](https://shiny.posit.co/r/deploy.html)
+
+# Conclusiones
+
+En este documento de código abierto hemos abordado el proceso completo de extracción, transformación y análisis de datos electorales de las Elecciones PASO 2023 en el Conurbano Sur de la Provincia de Buenos Aires. A través del uso de archivos JSON, hemos logrado organizar datos estructurados de manera legible. El código en R que creamos procesa estos archivos y los estructura en un formato adecuado para su análisis.
+
+Además, hemos desarrollado una aplicación Shiny interactiva que permite a los usuarios visualizar y comparar los resultados electorales de manera personalizada. Esta aplicación incluye opciones de selección para municipios, circuitos y agrupaciones políticas, lo que facilita la exploración y comparación de datos en el contexto específico de las elecciones.
+
+La intensión de este material fue presentar ambos procesos, los cuales constituyen momentos clave del trabajo con datos y que no siempre son del todo accesible para aquellos interesados en la programación y las ciencias sociales. En este sentido, la idea de aplicar estas técnicas a la analítica electoral ha sido una buena excusa para ver dos cosas importantes: 1) la programación nos permite crear herramientas para acceder a datos "difíciles" de conseguir y 2) simplifica los procesos de análisis y comunicación.
+
+En un mundo cada vez más impulsado por los datos y la tecnología, el poder crear y personalizar soluciones analíticas se convierte en una habilidad profesional esencial para comprender y abordar de manera informada los desafíos sociales y políticos contemporáneos.
